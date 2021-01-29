@@ -23,6 +23,7 @@ library(ggplot2)
 library(hrbrthemes)
 library(gridExtra)
 library(kableExtra)
+library(cluster)
 ```
 
 # Executive Summary
@@ -123,7 +124,7 @@ pain_mgmt <- pain_mgmt %>%
 
 # Analysis
 
-Figure \@ref(fig:elbow) in the Appendix displays the total sum of squares to centroids using up to 20 clusters. We see that the total sum of squares does not decrease significantly below 6 clusters, so we will be using 6 clusters in our analysis. Figure \@ref(fig:clusters) below displays our clustering on the number of patients and the county's opioid overdose death rate. Cluster 1 represents "central" values while clusters 2-6 represents clusters outside the center (for example, cluster 6 groups observations with large number of patients, but variable number of county overdose deaths).
+Figure \@ref(fig:elbow) in the Appendix displays the total sum of squares to centroids using up to 20 clusters. We see that the total sum of squares does not decrease significantly below 6 clusters, so we will be using 6 clusters in our analysis. Figure \@ref(fig:clusters) below displays our clustering on the number of patients and the county's opioid overdose death rate. Cluster 1 represents "central" values while clusters 2-6 represents clusters outside the center (for example, cluster 6 groups observations with large number of patients, but variable number of county overdose deaths). Finally, Figure \@ref(fig:silhouette) in the Appendix displays the silhouette plot for these clusters, with a average silhouette width between 0.3 and 0.4 - not great, but not terrible. We can see in the data that the observations are not very dispersed, and so it becomes harder to differentiate clusters.
 
 ```{r clusters, fig.cap = "Cluster Plot on normalized variables"}
 #set up clustering
@@ -153,7 +154,7 @@ pain_mgmt %>%
     labs(x = "Surcharge Ratio", y = "Density")
 ```
 
-Table \@ref(tab:analysis2) below displays some summary variables for each cluster. We see that cluster 4, with low patient number and low death rates, contains the highest median surcharge ratio, while the lowest is on group 6 (high patient amount, average death rates). Cluster 5, with high amount of patients and high overdose death rates, present a substantially lower median surcharge ratio. I suspect that this is due to socioeconomic factors, as it is plausible that less affluent areas contain both a larger amount of overdose deaths (deaths of despair) and a higher proportion of patients per doctor.
+Table \@ref(tab:analysis2) below displays some summary variables for each cluster. We see that cluster 4, with low patient number and low death rates, contains the highest median surcharge ratio, while the lowest is on group 6 (high patient amount, average death rates). Cluster 5, with high amount of patients and high overdose death rates, present a substantially lower median surcharge ratio. I suspect that this is due to socioeconomic factors, as it is plausible that less affluent areas contain both a larger amount of overdose deaths (deaths of despair) and a higher proportion of patients per doctor. It is also possible that the restrictions on number of patients for opioid-prescribing doctors might be binding enough that is plays a role in this result.
 
 ```{r analysis2}
 # return statistics by cluster
@@ -215,4 +216,9 @@ grid.arrange(npat_plot,dr_plot)
 set.seed(31)
 fviz_nbclust(pain_mgmt[,c("normalized_n_patients", "normalized_death_rate")], kmeans, method = "wss", k.max = 20)+ 
   theme_minimal()
+```
+
+```{r silhouette, fig.cap = "Clustering silhouette plot"}
+plot(silhouette(clusts$cluster, dist(pain_mgmt[,c("normalized_n_patients", "normalized_death_rate")])), 
+     col= c("red", "gold", "green", "lightblue", "darkblue", "pink"), border = NA, main = NA)
 ```
