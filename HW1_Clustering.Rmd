@@ -1,0 +1,218 @@
+---
+title: "Clustering Report"
+author: "Enzo Profli"
+output:
+  bookdown::pdf_book:
+    fig_caption: yes
+    keep_tex: yes
+    toc: false
+    number_sections: true
+header-includes: 
+    \usepackage{graphicx}
+    \usepackage{float} 
+    \floatplacement{figure}{H}
+urlcolor: cyan
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, out.width = "60%", out.height = "60%", fig.align="center")
+library(data.table)
+library(dplyr)
+library(factoextra)
+library(ggplot2)
+library(hrbrthemes)
+library(gridExtra)
+library(kableExtra)
+```
+
+# Executive Summary
+
+One of the most pressing health problems in the United States is that of the opioid epidemic. Thousands of American die each year due to opioid overdoses, often prescribed by legitimate doctors across the country. As explained during the text, literature indicates that these doctors receive many patients in so called "clinics" and often overcharge for prescribing certain drugs. However, in many cases, the number of patients these doctors receive is limited by law.
+
+In this scenario, a K-means clustering analysis has been performed to assess if doctors in areas with more drug overdose deaths and who receive a larger number of patients charge more for their services. The analysis indicates that this is not case: areas with relatively fewer overdose deaths and few-patient doctors charge more for medical visits. 
+
+There are a couple of possible explanations to this phenomenon. The first is that doctors in more affluent areas have naturally fewer patients, and the second is that these number of patients restrictions are binding enough that doctors overprescribing opioids serve fewer patients.
+
+# Problem Statement
+
+There is abundant investigation about medical practices in the United States that overprescribe opioids, contributing to the current opioid crisis in the United States. For example, Sontag (2013) discusses that addicted patients are subject to overcharges and medical practice closures, but also discusses that, in many cases, the number of patients for doctors prescribing opioids are limited by law. Hoffmann (2008) analyzes the example of a California doctor who was the largest provider of opioids in the states, and overcharged visits by $150. Given this discussion, are medical visit costs related to pain management larger in counties with large presence of opioids? And are these costs larger for doctors who receive more patients? To answer this question, we will utilize the Provider and Other Supplier Public Use Data from the Centers for Medicare & Medicaid Services (CMS) and Drug Poisoning Mortality in the United States by County from the National Center for Health Statistics (NCHS).
+
+# Assumptions
+
+* This analysis assumes that doctors operate in individual cities, and that patients do not travel far to visit doctors.
+
+* Obviously, the analysis assumes that the provided data is accurate, and that no errors about doctor visit types and about each doctor's area of expertise are made.
+
+# Methodology
+
+The first step in this process is cleaning and merging the relevant data, by county. Then, we subset the data for medical visits to pain management physicians, leaving us with 7700 observations (7200 after merges and cleaning). Once the data is adequately organized, we generate our variable of interest: Medicare surcharges. As described in the CMS data dictionary, Medicare and Medicaid allow a certain amount of funds for each type of medical service (allowed amount), and then doctors submit service charges (submitted charge), usually above the allowed amount. So, for each physician, we have the average surcharge (relative to Medicare-allowed amounts), as defined by Equation \@ref(eq:sub1) below:
+
+\begin{equation}
+  Surcharge\:Ratio = \frac{Allowed\:amount}{Average\:submitted\:charge}
+  (\#eq:sub1)
+\end{equation}
+
+The next step is clustering the data on the number of patients and the county drug poisoning mortality rate (a proxy for opioid overdoses on a county level). We will be using the K-means clustering algorithm, since we are dealing with Euclidean distances. In order to cluster the samples, we normalize these variables and take their logarithm, so that they resemble normal distributions, as shown in Figure \@ref(fig:npatients) in the Appendix. However, note that we are averaging over different types of services (say, 15-minute doctor visits and 45-minute doctor visits), which have plausibly very different number of patients per physician. So, when normalizing the number of patients, we do so in groups. For example, if a doctor received 50 15-minute visits, and the maximum number of 15-minute visits a physician has had was 100, the normalization yields 0.5, while a doctor who received 50 30-minute visits (and that was the maximum) will be normalized to 1 - even though the number of patients is equivalent. Finally, we want to cluster by doctor, and doctors provide different services, and so we take the normalized number of patients of that doctor to be the mean of the normalized number of patients in each service. We perform a similar operation to yield the doctor's average surcharge. After grouping by doctor, we possess 2005 observations.
+
+```{r load}
+medic <- fread("Medicare_Provider_Util_Payment_PUF_CY2018.txt")
+```
+
+```{r cleaning}
+pain_mgmt <- medic %>% filter(provider_type == "Pain Management")
+pain_mgmt <- pain_mgmt %>% filter(grepl("patient office or other outpatient", hcpcs_description))
+
+#overdose deaths data by county: https://www.cdc.gov/nchs/data-visualization/drug-poisoning-mortality/
+opioids <- fread("NCHS_-_Drug_Poisoning_Mortality_by_County__United_States.csv")
+opioids <- opioids %>% filter(Year == 2018)
+colnames(opioids)[which(colnames(opioids) == "Model-based Death Rate")] = "death_rate"
+opioids$state_abb <- state.abb[match(opioids$State, state.name)]
+
+##fix opioid county naming conventions (for merging)
+opioids$County <- gsub(" County.*| Parish.*| Borough.*| Census.*| Municipality.*|,.*", "", opioids$County) #remove descriptor
+opioids$County <- gsub("St. ", "saint ", opioids$County)
+opioids[which(opioids$FIPS == 24033), "County"] <- "prince georges"
+opioids$County <- tolower(opioids$County)
+
+#merge city and county data using dataset
+city_counties <- fread("city_county.csv")
+city_counties$CITY <- toupper(city_counties$CITY)
+city_counties <- city_counties[!duplicated(city_counties[, c("STATE_CODE","CITY")]),] # remove duplicate county info from data, keep first entry
+city_counties[which(city_counties$STATE_CODE == "FL" & city_counties$CITY == "TAMPA"), "COUNTY"] <- "Pinellas" 
+
+#add county data to pain_mgmt dataset
+pain_mgmt <- merge(pain_mgmt, city_counties[, c("STATE_CODE", "CITY", "COUNTY")], 
+                   by.x = c("nppes_provider_city", "nppes_provider_state"),
+                   by.y = c("CITY", "STATE_CODE"), all.x = T)
+pain_mgmt$COUNTY <- tolower(pain_mgmt$COUNTY)
+pain_mgmt[which(pain_mgmt$COUNTY == "st joseph"), "COUNTY"] <- "saint joseph"
+
+#add overdose death rate data (by county)
+pain_mgmt <- merge(pain_mgmt, opioids[, c("state_abb", "County", "death_rate")], 
+                   by.x = c("nppes_provider_state","COUNTY"),
+                   by.y = c("state_abb","County"), all.x = T)
+
+#remove rows with no county or dispensing information (487 observations)
+pain_mgmt <- pain_mgmt %>% filter(!is.na(death_rate))
+```
+
+```{r prep}
+#generate surcharge variable
+pain_mgmt <- pain_mgmt %>% mutate(surcharge_pct_ = (average_submitted_chrg_amt - average_Medicare_allowed_amt)/average_Medicare_allowed_amt)
+
+#normalize number of patients by visit length (quicker visits, you should expect more patients)
+## each code will be normalized differently, will be close to 1 if high number among certain type of visits
+pain_mgmt <- pain_mgmt %>%
+                group_by(hcpcs_code) %>%
+                mutate(normalized_n_patients_ = log(line_srvc_cnt)/max(log(line_srvc_cnt))) %>%
+                ungroup()
+
+#take log (normal distribution) and normalize overdose death rates
+pain_mgmt <- pain_mgmt %>% 
+                mutate(normalized_death_rate = log(death_rate)/max(log(death_rate)))
+
+#group by doctor, generate mean surcharge (across all treatment types) and select relevant columns
+pain_mgmt <- pain_mgmt %>% 
+                group_by(npi) %>%
+                mutate(surcharge_pct = mean(surcharge_pct_),
+                       normalized_n_patients = mean(normalized_n_patients_)) %>%
+                ungroup() %>%
+                distinct(npi, .keep_all = T) %>%
+                select(npi, nppes_provider_state, COUNTY, normalized_n_patients, normalized_death_rate, surcharge_pct)
+```
+
+# Analysis
+
+Figure \@ref(fig:elbow) in the Appendix displays the total sum of squares to centroids using up to 20 clusters. We see that the total sum of squares does not decrease significantly below 6 clusters, so we will be using 6 clusters in our analysis. Figure \@ref(fig:clusters) below displays our clustering on the number of patients and the county's opioid overdose death rate. Cluster 1 represents "central" values while clusters 2-6 represents clusters outside the center (for example, cluster 6 groups observations with large number of patients, but variable number of county overdose deaths).
+
+```{r clusters, fig.cap = "Cluster Plot on normalized variables"}
+#set up clustering
+set.seed(123)
+clusts <- kmeans(pain_mgmt[,c("normalized_n_patients", "normalized_death_rate")], centers = 6, nstart = 100)
+
+#plot clusters
+fviz_cluster(clusts, data = pain_mgmt[,c("normalized_n_patients", "normalized_death_rate")], 
+             show.clust.cent = T, geom = "point")+
+  labs(x = "Number of Patients (normalized)", y = "County Drug Poisoning Mortality Rate (Normalized)")+
+  theme_minimal()+
+  ggtitle("")
+```
+
+Now that we have the clusters, we can see the surcharge distribution for each cluster, as displayed in Figure \@ref(fig:analysis1). We see some interesting variability in the distributions. For example, cluster 1's distribution is very concentrated on lower levels, while cluster 4 has a much smaller peak over a larger range of surcharge ratios. We can also see some interesting density increases in some clusters. For example, group 4 has a small peak on a level slightly below 10, while groups 1 and 2 have small peaks in levels above 10. To gain a more analytical look at these results, we will inspect some summary variables in the next paragraph.
+
+```{r analysis1, echo = FALSE, fig.cap = "Surcharge ratio density plot for each cluster"}
+#add cluster to data
+pain_mgmt <- pain_mgmt %>% mutate(cluster = as.factor(clusts$cluster))
+pain_mgmt$cluster <- as.factor(pain_mgmt$cluster)
+
+#plot results
+pain_mgmt %>%
+  ggplot(aes(x = surcharge_pct, color = cluster, group = cluster)) +
+    geom_density()+
+    theme_minimal()+
+    labs(x = "Surcharge Ratio", y = "Density")
+```
+
+Table \@ref(tab:analysis2) below displays some summary variables for each cluster. We see that cluster 4, with low patient number and low death rates, contains the highest median surcharge ratio, while the lowest is on group 6 (high patient amount, average death rates). Cluster 5, with high amount of patients and high overdose death rates, present a substantially lower median surcharge ratio. I suspect that this is due to socioeconomic factors, as it is plausible that less affluent areas contain both a larger amount of overdose deaths (deaths of despair) and a higher proportion of patients per doctor.
+
+```{r analysis2}
+# return statistics by cluster
+sums <- pain_mgmt %>%
+          mutate(above_2 = (surcharge_pct > 3)) %>%
+          group_by(cluster) %>%
+          summarise("Mean Surcharge" = mean(surcharge_pct),
+                    "Median Surcharge" = median(surcharge_pct),
+                    "Min Surcharge" = min(surcharge_pct),
+                    "Max Surcharge" = max(surcharge_pct),
+                    "Proportion above 2" = sum(above_2)/n()) %>%
+          ungroup() %>%
+          mutate("Cluster Description" = c("Average patients, average mortality",
+                                           "Average patients, low mortality", 
+                                           "Few patients, high mortality",
+                                           "Few patients, low mortality",
+                                           "Many patients, high mortality",
+                                           "Many patients, average mortality"))
+
+# produce table
+kable(sums, booktabs = TRUE, digits = 2, longtable = TRUE,
+      linesep = '', caption = 'Summary Statistics per cluster') %>%
+  column_spec(column = 2:6, width = '0.7in')
+
+# regression controlling for GDP per capita?
+
+```
+
+
+# References
+
+Hoffman, D. (2008). Treating Pain v. Reducing Drug Diversion and Abuse: Recalibrating the Balance in out Drug Control Laws and Policies. Saint Louis University Journal of Health Law & Policy. Vol. 1: pp. 231-210.
+
+Sontag, D. (2013). Addiction Treatment with a Dark Side. New York Times. Retrieved from: https://www.nytimes.com/2013/11/17/health/in-demand-in-clinics-and-on-the-street-bupe-can-be-savior-or-menace.html
+
+# Appendix
+
+```{r npatients, fig.cap = "Distribution of clustering features"}
+#hrbrthemes::import_roboto_condensed()
+#windowsFonts("Arial" = windowsFont("Arial"))
+
+npat_plot <- pain_mgmt %>%
+                ggplot(aes(x = normalized_n_patients)) +
+                geom_density()+
+                theme_minimal()+
+                labs(x = "Logarithm of number of patients (normalized)", y = "Density")
+
+dr_plot <- pain_mgmt %>%
+                ggplot(aes(x = normalized_death_rate)) +
+                geom_density()+
+                theme_minimal()+
+                labs(x = "Logarithm of county overdose death rates (normalized)", y = "Density")
+
+grid.arrange(npat_plot,dr_plot)
+```
+
+```{r elbow, fig.cap = "\"Elbow Method\" to determine number of clusters"}
+# function to compute total within-cluster sum of squares
+set.seed(31)
+fviz_nbclust(pain_mgmt[,c("normalized_n_patients", "normalized_death_rate")], kmeans, method = "wss", k.max = 20)+ 
+  theme_minimal()
+```
