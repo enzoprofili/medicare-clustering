@@ -40,9 +40,7 @@ There is abundant investigation about medical practices in the United States tha
 
 # Assumptions
 
-* This analysis assumes that doctors operate in individual cities, and that patients do not travel far to visit doctors.
-
-* Obviously, the analysis assumes that the provided data is accurate, and that no errors about doctor visit types and about each doctor's area of expertise are made.
+This analysis assumes that doctors operate in individual cities, and that patients do not travel far to visit doctors. Obviously, the analysis assumes that the provided data is accurate, and that no errors about doctor visit types and about each doctor's area of expertise are made.
 
 # Methodology
 
@@ -53,7 +51,9 @@ The first step in this process is cleaning and merging the relevant data, by cou
   (\#eq:sub1)
 \end{equation}
 
-The next step is clustering the data on the number of patients and the county drug poisoning mortality rate (a proxy for opioid overdoses on a county level). We will be using the K-means clustering algorithm, since we are dealing with Euclidean distances. In order to cluster the samples, we normalize these variables and take their logarithm, so that they resemble normal distributions, as shown in Figure \@ref(fig:npatients) in the Appendix. However, note that we are averaging over different types of services (say, 15-minute doctor visits and 45-minute doctor visits), which have plausibly very different number of patients per physician. So, when normalizing the number of patients, we do so in groups. For example, if a doctor received 50 15-minute visits, and the maximum number of 15-minute visits a physician has had was 100, the normalization yields 0.5, while a doctor who received 50 30-minute visits (and that was the maximum) will be normalized to 1 - even though the number of patients is equivalent. Finally, we want to cluster by doctor, and doctors provide different services, and so we take the normalized number of patients of that doctor to be the mean of the normalized number of patients in each service. We perform a similar operation to yield the doctor's average surcharge. After grouping by doctor, we possess 2005 observations.
+The next step is clustering the data on the number of patients and the county drug poisoning mortality rate (a proxy for opioid overdoses on a county level). We will be using the K-means clustering algorithm, since we are dealing with Euclidean distances. It is important to note that the two relevant feature variables contained, by inspection, no implausible outliers. Moreover, while there were observations far from the mean, they were always in groups. So, I have elected not to remove outliers using techniques such as Z-score, as they would remove potentially valuable data. 
+
+In order to cluster the samples, we normalize these variables and take their logarithm, so that they resemble normal distributions, as shown in Figure \@ref(fig:npatients) in the Appendix. However, note that we are averaging over different types of services (say, 15-minute and 45-minute doctor visits), which plausibly have different number of patients per physician. So, when normalizing the number of patients, we do so in groups. For example, if a doctor received 50 15-minute visits, and the maximum number of 15-minute visits a physician has had was 100, the normalization yields 0.5, while a doctor who received 50 30-minute visits (and that was the maximum) will be normalized to 1 - even though the number of patients is equivalent. Finally, we want to cluster by doctor, and doctors provide different services, and so we take the normalized number of patients of that doctor to be the mean of the normalized number of patients in each service. We perform a similar operation to yield the doctor's average surcharge. After grouping by doctor, we possess 2005 observations.
 
 ```{r load}
 medic <- fread("Medicare_Provider_Util_Payment_PUF_CY2018.txt")
